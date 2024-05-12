@@ -48,13 +48,13 @@ def rename_images(directory):
         for file in files:  # 파일들을 순회
             filepath = os.path.join(root, file)  # 파일의 전체 경로를 가져옴
             if filepath.lower().endswith('.jpg'):  # 파일이 JPG 이미지인지 확인
-                new_filename = f"{count}.jpg"  
+                new_filename = f"M0{count}.jpg"  
                 os.rename(filepath, os.path.join(root, new_filename))  # 파일 이름을 변경
                 count += 1  # 숫자를 증가시켜 다음 파일 이름을 설정합니다.
 
 
 if __name__ == "__main__":  # 이 스크립트가 직접 실행될 때만 실행되게 하기 위해 __name__으로 설정했음
-    dpath = "G:\내 드라이브\Colab Notebooks\Tickie\Tickie_Improved-object-oriented-accuracy\image\kickboard\existPeople"  # 이미지를 포함한 디렉토리의 경로를 설정합니다.
+    dpath = "G:\내 드라이브\Colab Notebooks\Tickie\Tickie_Improved-object-oriented-accuracy\image\layPeople"  # 이미지를 포함한 디렉토리의 경로를 설정합니다.
     duplicate_images = find_duplicate_images(dpath)  # 중복된 이미지를 찾음
     # 중복된 이미지가 있을 경우:
     if duplicate_images:  
