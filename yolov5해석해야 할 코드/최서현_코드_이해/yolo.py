@@ -95,16 +95,34 @@ class Detect(nn.Module):
     stride = None  # strides computed during build
     dynamic = False  # force grid reconstruction
     export = False  # export mode
+    
+    #stride: 구축과정에서 계산되는 변수. 각 피쳐 맵의 스트라이드를 의미하며, 기본적으로 이미지의 차원 감소율을 나타낸다.
+    #입력 이미지에서 각 검출 레이어의 출력까지의 공간적 축소 비율이라고 함.
+    #레이어의 앵커 박스 계산 시 사용되어, 특성 맵 상의 위치를 원본 이미지 상의 실제 위치로 변환하는 데 필요하다.abs
 
+    #dynamic: True일 때, 네트워크가 추론 시 매번 그리드를 재구성하도록 강제하는 변수. 
+    #그리드는 원래는 한 번 생성되면 변경되지 않지만, 입력 이미지의 크기가 달라지거나 다른 요인으로 인해 그리드의 재계산이 필요할 때 이 변수를 활성화하면 됨
+
+    #export: 이 변수가 활성화되면 클래스는 추론 결과를 반환할 때 추가적인 정보나 중간 데이터 없이 최종 결과만 반환하는 방식으로 작동. 
+    #이 변수는 다른 형식으로 변환하거나 내보낼 때 활성화하면 좋다고 함
+
+
+    #Detect 클래스의 생성자를 정의하는 함수
     def __init__(self, nc=80, anchors=(), ch=(), inplace=True):
         """Initializes YOLOv5 detection layer with specified classes, anchors, channels, and inplace operations."""
-        super().__init__()
-        self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        self.na = len(anchors[0]) // 2  # number of anchors
-        self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
-        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
+        super().__init__() #부모 클래스의 생성자를 호출하는 방법. 
+        #즉, nn.Module이 여기서는 부모 클래스 인 것이고, 이 부모 클래스의 모든 초기 설정이 수행됨. 이후 사용자가 정의한 네트워크 레이어나 모듈에 파이토치기능을 제공.
+        
+        self.nc = nc  # 모델이 인식해야 할 클래스의 수
+        self.no = nc + 5  #각 앵커박스가 출력해야 하는 값의 총 수를 계산하여 self.no에 저장.
+                          #nc + 5는 클래스 수에 대한 확률값들, 바운딩박스의 중심좌표, 너비와 높이, 객체 존재 확률을 포함한다.
+
+        self.nl = len(anchors)  # anchors리스트의 길이를 사용하여 모델에 있는 검출 레이어의 수를 결정. 
+                                #anchors: 각 레이어에 대한 앵커 박스의 크기 정의
+        self.na = len(anchors[0]) // 2 # 첫 번째 앵커 그룹의 앵커 박스 개수 계산. 각 앵커는 너비와 높이(2개)를 가지므로, 전체 길이를 2로 나눈다.
+        self.grid = [torch.empty(0) for _ in range(self.nl)]  #각 검출 레이어에 대해 초기화된 빈 그리드 리스트 생성. 
+                                                              #이 때 생성된 그리드는 각 레이어의 특성 맵에 해당하는 위치 정보를 저장하는 데 사용 
+        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # anchor베열을 파이토치 텐서로 변환, 이를 모듈의 버퍼로 등록. float()으로 부동소수점 설정, view()로 각 레이어의 앵커를 적절한 형태로 재배열함
         self.register_buffer("anchors", torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
         self.inplace = inplace  # use inplace ops (e.g. slice assignment)
