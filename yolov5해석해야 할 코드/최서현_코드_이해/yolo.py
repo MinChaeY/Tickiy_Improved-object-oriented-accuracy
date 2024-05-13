@@ -128,29 +128,36 @@ class Detect(nn.Module):
                                                                                 #입력 특성 맵을 해당 레이어의 출력 채널 수로 변환하는 역할 수행.
         self.inplace = inplace  # 매개변수 값을 인스턴스 변수에 저장. 연산을 수행할 때 입력 데이터를 직접 수정할 지 복사본을 만들어 사용할 지 결정. 
 
+    #모델의 입력 데이터 x를 처리하기 위한 forward 메소드를 정의
     def forward(self, x):
         """Processes input through YOLOv5 layers, altering shape for detection: `x(bs, 3, ny, nx, 85)`."""
-        z = []  # inference output
-        for i in range(self.nl):
-            x[i] = self.m[i](x[i])  # conv
-            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+        z = []  # 추론 결과를 저장할 빈 리스트 z 초기화
+        for i in range(self.nl): #모델 레이어 수(nl)만큼 반복한다. 
+            x[i] = self.m[i](x[i])  # i번쨰 레이어의 컨볼루션 연산을 적용한다. 
+            bs, _, ny, nx = x[i].shape  #컨볼류션 결과인 x[i]의 차원을 구조화하여 각 변수에 저장
+            #bs: 배치 사이즈, ny: 높이, nx: 넓이
+
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            #x[i]를 주어진 차원으로 재구성하고 순서를 재배열하여 메모리상에 연속적으로 만듦
 
-            if not self.training:  # inference
-                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
-                    self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
+            if not self.training:  #학습모드가 아닐 때(추론모드일 때)
+                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]: #동적 그리드 생성이 필요하거나 기존 그리드의 차원이 맞지 않을 경우 새로운 그리드 생성
+                    self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i) # make_grid 함수를 호출하여 그리드와 앵커 그리드 생성
 
-                if isinstance(self, Segment):  # (boxes + masks)
-                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4)
+                if isinstance(self, Segment):  # 모델이 Segment인스턴스일 경우(추가적인 마스크 정보 처리)
+                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4) #출력을 다른 컴포넌트로 분할
+                    
+                    # xy좌표, wh 크기, conf신뢰도, mask
                     xy = (xy.sigmoid() * 2 + self.grid[i]) * self.stride[i]  # xy
                     wh = (wh.sigmoid() * 2) ** 2 * self.anchor_grid[i]  # wh
                     y = torch.cat((xy, wh, conf.sigmoid(), mask), 4)
-                else:  # Detect (boxes only)
+                
+                else:  # 세그먼트가 아닐 경우 감지 정보만 처리
                     xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
                     xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
                     wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
                     y = torch.cat((xy, wh, conf), 4)
-                z.append(y.view(bs, self.na * nx * ny, self.no))
+                z.append(y.view(bs, self.na * nx * ny, self.no)) #결과 y를 
 
         return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
 
