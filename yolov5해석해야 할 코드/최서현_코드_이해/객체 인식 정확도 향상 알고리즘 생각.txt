@@ -1,0 +1,41 @@
+객체 인식 정확도 향상 알고리즘을 풀어가는 방법
+1. 앵커 박스 수정 알고리즘. - 동적 앵커 박스 조정. 
+동적으로 앵커 박스를 조정하는 코드는 존재하나, 조정하는 방법이 다양함.  앵커 박스를 조정하는 로직을 상세하게 조직하여 차별점을 두면 괜찮지 않나..?
+
+우리가 수집한 데이터셋을 학습시키는 과정에서 손실 함수를 계산할 때, 예측된 바운딩 박스와 실제 바운딩 박스 사이의 차이를 기반으로 앵커 박스의 크기를 조정하는 로직을 추가하면 좋지않을까..?
+
+찾아보니, yolov5s.yaml과 같은 모델 설정 파일에서는 정적 앵커 박스를 사용하고 있음. 
+
+아주아주 간단한 동적 앵커 박스 조정 방법:
+def forward(self, x):
+
+ for i in range(self.nl):
+   x[i] = self.m[i](x[i])
+   bs, _, ny, nx = x[i].shape
+   x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+    # 앵커 박스 크기 업데이트 로직
+   anchor_adjustments = self.compute_anchor_adjustments(x[i], ground_truth_boxes)
+   self.anchors[i] = self.update_anchors(self.anchors[i], anchor_adjustments)
+
+위 코드 중
+
+   anchor_adjustments = self.compute_anchor_adjustments(x[i], ground_truth_boxes)
+   self.anchors[i] = self.update_anchors(self.anchors[i], anchor_adjustments)
+이 부분이다. 
+여기에서 세세한 부분은 직접 조정해가며 알고리즘을 개발해 나가는 방향은 어떨까?
+
+2. 손실 함수를 다양하게 조합해 보는 방식. 
+https://www.kaggle.com/code/sungjunghwan/loss-function-of-image-segmentation
+
+https://medium.com/@kimminha1994/loss-functions-for-semantic-segmentation-634a982de702
+
+여러 손실 함수를 합산하여 복합손실 함수를 얻고 세그멘테이션 정확도를 높인다. 
+예) Dice손실, IoU손실을 합산하기 
+
+3. 앙상블 기법 – 여러 모델의 예측을 결합하여 최종 성능을 향상시키는 방법. 
+여러 방식으로 모델을 개발한 다음, 이런 데이터셋을 학습한 모델(예: x)과 이런 데이터셋을 학습한 모델(예: y)을 앙상블하였더니 가장 정확도가 높았다. 이런 식으로 해 나가는 건 어떨까?
+이 앙상블 기법을 통해 여러 모델의 강점을 종합하면 정확도가 높이 나올 것 같다.
+
+
+
