@@ -24,10 +24,10 @@ from torch.cuda import amp      #automatic mixed procision을 사용하여 모�
                                 #float16타입을 사용해 학습 속도 향상
 # Import 'ultralytics' package or install if missing
 try:
-    import ultralytics
+    import ultralytics          # 패키지 가져오거나 설치
 
     assert hasattr(ultralytics, "__version__")  # verify package is not directory
-except (ImportError, AssertionError):
+except (ImportError, AssertionError):  #ultralytics가 설치되어 있지 않으면 최신버젼 설치
     import os
 
     os.system("pip install -U ultralytics")
@@ -35,61 +35,82 @@ except (ImportError, AssertionError):
 
 from ultralytics.utils.plotting import Annotator, colors, save_one_box
 
-from utils import TryExcept
-from utils.dataloaders import exif_transpose, letterbox
+from utils import TryExcept      #예외 처리를 위한 유틸리티 클래스
+from utils.dataloaders import exif_transpose, letterbox  #데이터 로드를 위한 함수, 이미지 전처리 및 변환
 from utils.general import (
-    LOGGER,
-    ROOT,
-    Profile,
-    check_requirements,
-    check_suffix,
-    check_version,
-    colorstr,
-    increment_path,
-    is_jupyter,
-    make_divisible,
-    non_max_suppression,
-    scale_boxes,
-    xywh2xyxy,
-    xyxy2xywh,
-    yaml_load,
+    LOGGER,                #프로크램 실행 상태 기록
+    ROOT,                  #루트 디렉터리를 나타내는 변수
+    Profile,               #코드의 실행 시간등 측정
+    check_requirements,    #시스템 또는 환경이 특정 요구 사항을 충족하는지 검사
+    check_suffix,          #파일이 주어진 확장자를 가지고 있는지 확인
+    check_version,         #버전 확인
+    colorstr,              #문자열에 색 추가, 로그 메세지를 시각적으로 구분하기 위함
+    increment_path,        #디렉터리 경로를 증가시켜 중복 방지
+    is_jupyter,            #주피터 환경에서 실행되는지 확인
+    make_divisible,        #주어진 값을 특정 숫자의 배수가 되도록 조정
+    non_max_suppression,   #객체 탐지에서 여러 박스 중 최적의 박스만 선택
+    scale_boxes,           #박스 좌표를 다른 차원으로 스케일링,특성별로 데이터 스케일이 다르면 머신러닝이 잘 안됨 
+    xywh2xyxy,             #박스 좌표를 중심x ,중심y ,너비 ,높이 -> x1,y1,x2,y2
+    xyxy2xywh,             #위와 반대로 
+    yaml_load,             # yaml파일 파싱해서 python데이터 구조로 로드
 )
-from utils.torch_utils import copy_attr, smart_inference_mode
+from utils.torch_utils import copy_attr, smart_inference_mode  #한 객체에서 다른 객체로 속성 복사, 성능을 높이기 위한 모드
 
-
-def autopad(k, p=None, d=1):
+#패딩 크기 계산
+def autopad(k, p=None, d=1):  
     """
     Pads kernel to 'same' output shape, adjusting for optional dilation; returns padding size.
-
-    `k`: kernel, `p`: padding, `d`: dilation.
+    커널,패딩,팽창을 기반으로 필요한 패딩 크기를 자동으로 계산하는 함수
+    
+    `k`: kernel 커널 사이즈, `p`: padding 기본값 None, `d`: dilation 팽창 기본값 1.
+    커널은 필터랑 같은 개념. 2차원에서 보통 3x3의 pixel로 사용한다. 이미지 직접 보는 것이 좋음.
+    팽창은 커널의 각 요소 사이에 공간을 추가하는 것을 의미한다. 입력 픽셀수는 동일하지만, 커널이 커버하는 입력 영역을 넓힐 수 있다
+    
     """
-    if d > 1:
+    if d > 1:  #큰 객체를 감지하거나 공간적 해상도를 유지하기 위함
         k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
-    if p is None:
+        #커널의 각 요소 사이에 k-1만큼의 공간을 추가함, 정수가 아닌 list나 tuple같은 경우
+        
+    if p is None:  #입력데이터의 가장자리에 추가적인 값을 넣어, 커널이 가장자리를 처리할 때 필요한 컨텍스트를 제공, 입력 이미지와 출력 이미지 사이즈를 같게 함
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
-    return p
+    return p   #커널 크기를 2로 나눈 나머지
 
-
-class Conv(nn.Module):
+#표준 합성곱 레이어 구현
+class Conv(nn.Module): #nn.Module을 상속받는 서브클래스로 신경망 층이나 모델을 관리함 
     # Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)
-    default_act = nn.SiLU()  # default activation
+    default_act = nn.SiLU()  # default activation 
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
-        """Initializes a standard convolution layer with optional batch normalization and activation."""
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True): #객체 생성시 자동 호출
+        """Initializes a standard convolution layer with optional batch normalization and activation.
+           c1, c2 : 입력,출력 채널 수. 신경망에서 데이터가 흐르는 채널 또는 특징 맵의 수. 특징맵은 커널을 이용해 이미지의 특징을 추출한 것임(합성곱 연산의 결과). 
+           k, s, p : 커널크기, 스트라이드, 패딩. 스트라이드는 커널이 이동하는 거리이다.
+           g, d : 그룹수, 팽창. 특정 그룸 내에서만 연산을 제한하거나 커널을 팽창시킬 수 있음.
+           act : 활성화 함수. 비선형성을 도입하는 함수. 주어진 입력에 대해 더 복잡한 표현을 가능하게 함
+                 활성화 함수로 모두 선형함수를 이용하면 다층구조로 하는 의미가 없어짐.
+        """
         super().__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
-        self.bn = nn.BatchNorm2d(c2)
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False) #2D 합성곱 층 정의
+        self.bn = nn.BatchNorm2d(c2)   #배치 정규화
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
-
+                   # default는 nn.SiLU(), act가 nn.Module의 인스턴스인 경우 사용자 지정 함수 사용, 그외 활성화 함수 적용 x
     def forward(self, x):
-        """Applies a convolution followed by batch normalization and an activation function to the input tensor `x`."""
-        return self.act(self.bn(self.conv(x)))
+        """Applies a convolution followed by batch normalization and an activation function to the input tensor `x`.
+           데이터가 전달될 때 호출되는 메서드. 입력 x에 대해 합성곱, 배치 정규화, 활성화 순서로 연산 적용
+           이 과정을 통해 입력 데이터는 필터링되고 변형되어 네트워크의 다음 층으로 전달된다.
+        """
+        return self.act(self.bn(self.conv(x)))  #여기 이해 안됨
 
     def forward_fuse(self, x):
-        """Applies a fused convolution and activation function to the input tensor `x`."""
+        """Applies a fused convolution and activation function to the input tensor `x`.
+           배치 정규화 안함. 계산 간소화로 속도 향상  
+        """
         return self.act(self.conv(x))
+    
+    """ x는 입력 텐서라고 함. 신경망에서 제공되는 다차원 배열을 의미하는 데이터
+        보통 4차원 텐서로 batch_size : 한번에 처리하는 데이터 수, channels : 데이터 채널 수, 흑백은 1 RGB는 3, height,width를 갖는다.
+    """
 
-
+#Conv클래스의 생성자를 호출하여 깊이별 합성곱 층을 초기화한다.
 class DWConv(Conv):
     # Depth-wise convolution
     def __init__(self, c1, c2, k=1, s=1, d=1, act=True):
@@ -99,6 +120,7 @@ class DWConv(Conv):
         super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
 
 
+#다운 샘플링된 특징 맵을 다시 원래의 차원 또는 더 큰 차원으로 복원할 수 있다.
 class DWConvTranspose2d(nn.ConvTranspose2d):
     # Depth-wise transpose convolution
     def __init__(self, c1, c2, k=1, s=1, p1=0, p2=0):
@@ -108,42 +130,45 @@ class DWConvTranspose2d(nn.ConvTranspose2d):
         super().__init__(c1, c2, k, s, p1, p2, groups=math.gcd(c1, c2))
 
 
-class TransformerLayer(nn.Module):
+#트랜스포머 레이어를 구현한다.
+class TransformerLayer(nn.Module): #nn.Module 상속받음
     # Transformer layer https://arxiv.org/abs/2010.11929 (LayerNorm layers removed for better performance)
-    def __init__(self, c, num_heads):
+    def __init__(self, c, num_heads): #입력 차원 'c'와 멀티헤드 어텐션을 위한 헤드 수 'num_heads'. 차원은 신경망이 얼마나 많은 입력 노드를 가져야 하는지 결정
         """
         Initializes a transformer layer, sans LayerNorm for performance, with multihead attention and linear layers.
-
+        transformer layer를 초기화함.
         See  as described in https://arxiv.org/abs/2010.11929.
         """
         super().__init__()
-        self.q = nn.Linear(c, c, bias=False)
-        self.k = nn.Linear(c, c, bias=False)
-        self.v = nn.Linear(c, c, bias=False)
-        self.ma = nn.MultiheadAttention(embed_dim=c, num_heads=num_heads)
-        self.fc1 = nn.Linear(c, c, bias=False)
-        self.fc2 = nn.Linear(c, c, bias=False)
+        self.q = nn.Linear(c, c, bias=False) #쿼리 벡터를 생성하기 위한 선형 변환. 쿼리 벡터는 처리중인 입력 데이터의 부분을 대표하는 벡터
+        self.k = nn.Linear(c, c, bias=False) #키 벡터 생성하기 위한 선형 변환. 쿼리가 참조하거나 비교할 대상이 되는 입력 데이터의 다른 부분들을 대표
+        self.v = nn.Linear(c, c, bias=False) #값 벡터 생성하기 위한 선형 변환. 키에 대응되는 입력 데이터의 부분 대표. 쿼리에 의해 계산된 유사도 점수에 따라 가중치 부여됨, 쿼리와 키의 유사도가 높을수록 가중치 커짐
+        self.ma = nn.MultiheadAttention(embed_dim=c, num_heads=num_heads) #멀티 헤드 어텐션 모듈
+                                                                          #헤드의 수만큼 attention을 병렬로 나누어 계산함
+        self.fc1 = nn.Linear(c, c, bias=False) #첫 번째 선형 변환, 입력 데이터의 특징을 다시 매핑하여 중간 표현을 생성하는데 도움을 준다.
+        self.fc2 = nn.Linear(c, c, bias=False) #두 번째 선형 변환, 중간 표현을 다시 변환, 더 복잡한 함수를 모델링할 수 있도록 돕는다. 
 
     def forward(self, x):
         """Performs forward pass using MultiheadAttention and two linear transformations with residual connections."""
-        x = self.ma(self.q(x), self.k(x), self.v(x))[0] + x
-        x = self.fc2(self.fc1(x)) + x
-        return x
+        x = self.ma(self.q(x), self.k(x), self.v(x))[0] + x #멀티헤드 어텐션 적용 후 잔자 연결 수행
+        x = self.fc2(self.fc1(x)) + x                       #두 번째 선형 변환까지 적용 후 잔차 연결 수행
+        return x                                            #x를 직접적으로 출력에 더하는 방식, 깊은 네트워크에서 정보가 손실되는 것을 방지함. 학습 과정 안정화
 
 
+#비전 작업을 위한 트랜스포머 아키텍처 구현
 class TransformerBlock(nn.Module):
     # Vision Transformer https://arxiv.org/abs/2010.11929
     def __init__(self, c1, c2, num_heads, num_layers):
         """Initializes a Transformer block for vision tasks, adapting dimensions if necessary and stacking specified
         layers.
         """
-        super().__init__()
+        super().__init__()  #생성자 호출, 모듈 초기화
         self.conv = None
         if c1 != c2:
-            self.conv = Conv(c1, c2)
-        self.linear = nn.Linear(c2, c2)  # learnable position embedding
-        self.tr = nn.Sequential(*(TransformerLayer(c2, num_heads) for _ in range(num_layers)))
-        self.c2 = c2
+            self.conv = Conv(c1, c2) #입력과 출력 채널 수가 다를 경우, 입력 차원을 맞추기 위한 합성곱 층 추가
+        self.linear = nn.Linear(c2, c2)  # learnable position embedding 학습가능한 위치 인코딩을 위한 선형 레이어
+        self.tr = nn.Sequential(*(TransformerLayer(c2, num_heads) for _ in range(num_layers))) #지정된 수의 트랜스포머 레이어를 순차적으로 쌓음
+        self.c2 = c2  #출력 채널 수 저장
 
     def forward(self, x):
         """Processes input through an optional convolution, followed by Transformer layers and position embeddings for
