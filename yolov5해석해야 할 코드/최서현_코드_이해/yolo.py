@@ -145,21 +145,27 @@ class Detect(nn.Module):
                     self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i) # make_grid 함수를 호출하여 그리드와 앵커 그리드 생성
 
                 if isinstance(self, Segment):  # 모델이 Segment인스턴스일 경우(추가적인 마스크 정보 처리)
-                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4) #출력을 다른 컴포넌트로 분할
-                    
-                    # xy좌표, wh 크기, conf신뢰도, mask
-                    xy = (xy.sigmoid() * 2 + self.grid[i]) * self.stride[i]  # xy
-                    wh = (wh.sigmoid() * 2) ** 2 * self.anchor_grid[i]  # wh
-                    y = torch.cat((xy, wh, conf.sigmoid(), mask), 4)
+                                               #여기서 segment 클래스는 추가적인 마스크 정보를 포함할 수 있는 확장 클래스일 듯
+                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4) #(self.no - self.nc - 5)는 추가 정보를 처리하기 위한 차원 수를 나타냄
+                                                                                                   #conf: 객체의 존재에 대한 신뢰도 점수와 클래스 확률(클래스 수 + 1), mask: 추가적인 세그먼트 마스크 정보
+                                                                                                   # xy: 바운딩박스의 중심 위치(2개차원), wh: 바운딩박스의 너비와 높이
+                    xy = (xy.sigmoid() * 2 + self.grid[i]) * self.stride[i] #xy.sigmoid: 중심 위치값을 0과1 사이로 스케일링, *2 + self.grid[i]: 격자의 중심에 맞춰 위치를 조정, self.stride[i]: 스트라이드를 적용하여 입력 이미지의 원래 크기에 맞게 스케일 조정
+                    wh = (wh.sigmoid() * 2) ** 2 * self.anchor_grid[i]  #wh.sigmoid: 너비와 높이를 0과1 사이로 스케일링, *2: 실제 객체의 크기 비율 확장, **2: 실제 크기를 더 정확하게 반영하기 위해 제곱, self.anchor_grd[i]: 각 격자에 대응하는 앵커 박스 크기를 적용
+                    y = torch.cat((xy, wh, conf.sigmoid(), mask), 4) #각 구성 요소를 마지막 차원(4번째 차원을 따라 결하하여 최종 출력 텐서 y를 형성)
                 
-                else:  # 세그먼트가 아닐 경우 감지 정보만 처리
-                    xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
+                else:  # 세그먼트가 아닐 경우, 객체 감지에만 초점을 맞춘 처리 수행
+                    xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4) #위 if문과 하는 일은 똑같지만 마스크 정보를 제외하고 처리
                     xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
                     wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
                     y = torch.cat((xy, wh, conf), 4)
-                z.append(y.view(bs, self.na * nx * ny, self.no)) #결과 y를 
+                z.append(y.view(bs, self.na * nx * ny, self.no)) #텐서를 [배치 크기, 앵커 박스 수 * 격자크기, 출력 속성 수] 형태로 변환하여 z(레이어 또는 각 배치의 출력을 순차적으로 저장하는 리스트)에 조정된 y텐서를 추가
+                # y: 바운딩 박스의 정보(위치, 크기, 신뢰도, 필요한 경우 추가 데이터)를 포함하는 텐서 view(): 텐서의 형태를 변환하는 메소드 bs: 배치크기(한 번에 처리되는 이미지 수) 
+                #self.na: 각 격자 위치에 대해 예측되는 앵커 박스의 수, nx*ny: 이미지가 격자로 나뉜 후 격자의 셀 수 (nx: 너비 방향의 셀 수, ny: 높이 방향의 셀 수), self.no: 출력 텐서의 각 요소가 가지는 속성의 수(위치(xw), 크기(wh), 신뢰도(conf)및 필요한 경우 추가 정보)를 포함한다.
 
-        return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
+        return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x) 
+        # if self.trainng일 때(모델이 학습모드에 있을 때) 원본 입력 x를 반환. 
+        #아니면 torch.cat(z, 1, ) if self export일 때 (모델이 추론을 위해 내보내기 모드에 있을 때) x리스트의 모든 텐서를 첫 번째 차원을 따라 연결. torch.cat(z, 1)은 리스트 z에 저장된 여러 텐서를 하나의 텐서로 병합(각 레이어나 배치에서의 예측 결과를 하나의 텐서로 통합하기 위함)
+        #(torch.cat(z, 1), x): self.trainng과 self.export 모두 false일 경우(즉 모델이 ㅍㅛ준 추론 모드에 있을 때) z의 모든 텐서를 연결한 결과와 원본 입력 x를 함께 반환. 이 경우, 연결된 결과는 모델이 만든 모든 예측을 포함하고, x는 원본 데이터를 참조하기 위해 반환된다. (입력데이터를 분석하거나 후처리할 때 필요하다고 함)
 
     def _make_grid(self, nx=20, ny=20, i=0, torch_1_10=check_version(torch.__version__, "1.10.0")):
         """Generates a mesh grid for anchor boxes with optional compatibility for torch versions < 1.10."""

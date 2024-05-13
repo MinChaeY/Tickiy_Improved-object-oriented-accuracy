@@ -126,6 +126,8 @@ class Detect(nn.Module):
         return grid, anchor_grid
 
 
+
+
 class Segment(Detect):
     # YOLOv5 Segment head for segmentation models
     def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
