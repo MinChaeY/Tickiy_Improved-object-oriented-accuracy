@@ -122,10 +122,11 @@ class Detect(nn.Module):
         self.na = len(anchors[0]) // 2 # 첫 번째 앵커 그룹의 앵커 박스 개수 계산. 각 앵커는 너비와 높이(2개)를 가지므로, 전체 길이를 2로 나눈다.
         self.grid = [torch.empty(0) for _ in range(self.nl)]  #각 검출 레이어에 대해 초기화된 빈 그리드 리스트 생성. 
                                                               #이 때 생성된 그리드는 각 레이어의 특성 맵에 해당하는 위치 정보를 저장하는 데 사용 
-        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # anchor베열을 파이토치 텐서로 변환, 이를 모듈의 버퍼로 등록. float()으로 부동소수점 설정, view()로 각 레이어의 앵커를 적절한 형태로 재배열함
-        self.register_buffer("anchors", torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
-        self.inplace = inplace  # use inplace ops (e.g. slice assignment)
+        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # 각 레이어에 대해 초기화된 빈 리스트 생성. 이 앵커 그리드는 각 위치에 해당하는 앵커 받스의 실제 크기 저장
+        self.register_buffer("anchors", torch.tensor(anchors).float().view(self.nl, -1, 2))  # anchor베열을 파이토치 텐서로 변환, 이를 모듈의 버퍼로 등록. float()으로 부동소수점 설정, view()로 각 레이어의 앵커를 적절한 형태로 재배열함
+        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # 각 레이어의 입력 채널 수(ch)에 대해 출력 채널 수가 self.no * self.na (1x1)합성곱 충 생성, 이를 모듈 리스트에 추가. 
+                                                                                #입력 특성 맵을 해당 레이어의 출력 채널 수로 변환하는 역할 수행.
+        self.inplace = inplace  # 매개변수 값을 인스턴스 변수에 저장. 연산을 수행할 때 입력 데이터를 직접 수정할 지 복사본을 만들어 사용할 지 결정. 
 
     def forward(self, x):
         """Processes input through YOLOv5 layers, altering shape for detection: `x(bs, 3, ny, nx, 85)`."""
